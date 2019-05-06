@@ -5,7 +5,7 @@ import { screenshareModal } from './screenshareModal';
 import { updateModal } from './updateModal';
 import { servers } from './servers';
 import { sidebar } from './sidebar';
-import webview from './webview';
+import { webviews } from './webviews';
 import setTouchBar from './touchBar';
 const { app, dialog, getCurrentWindow, shell } = remote;
 const {
@@ -18,6 +18,15 @@ const {
 	tray,
 	updates,
 } = remote.require('./main');
+
+
+const setLoadingVisible = (visible) => {
+	document.querySelector('.app-page').classList[visible ? 'add' : 'remove']('app-page--loading');
+};
+
+const setLandingVisible = (visible) => {
+	document.querySelector('.landing-page').classList[visible ? 'remove' : 'add']('hide');
+};
 
 const updatePreferences = () => {
 	const showWindowOnUnreadChanged = localStorage.getItem('showWindowOnUnreadChanged') === 'true';
@@ -45,7 +54,7 @@ const updatePreferences = () => {
 		visible: hasSidebar,
 	});
 
-	webview.setSidebarPaddingEnabled(!hasSidebar);
+	webviews.setSidebarPaddingEnabled(!hasSidebar);
 
 	getCurrentWindow().hasTrayIcon = hasTrayIcon;
 };
@@ -67,7 +76,6 @@ const updateServers = () => {
 		active: servers.getActive(),
 	});
 };
-
 
 const updateWindowState = () => tray.setState({ isMainWindowVisible: getCurrentWindow().isVisible() });
 
@@ -163,7 +171,7 @@ export default () => {
 	let styles = {};
 
 	window.addEventListener('beforeunload', destroyAll);
-	window.addEventListener('focus', () => webview.focusActive());
+	window.addEventListener('focus', () => webviews.focusActive());
 
 	aboutModal.on('check-for-updates', () => updates.checkForUpdates());
 	aboutModal.on('set-check-for-updates-on-start', (checked) => updates.setAutoUpdate(checked));
@@ -210,7 +218,8 @@ export default () => {
 	menus.on('add-new-server', () => {
 		getCurrentWindow().show();
 		servers.setActive(null);
-		webview.showLanding();
+		setLoadingVisible(false);
+		setLandingVisible(true);
 	});
 
 	menus.on('select-server', ({ url }) => {
@@ -223,7 +232,7 @@ export default () => {
 			certificates.clear();
 		}
 
-		const activeWebview = webview.getActive();
+		const activeWebview = webviews.getActive();
 		if (!activeWebview) {
 			return;
 		}
@@ -237,14 +246,14 @@ export default () => {
 	});
 
 	menus.on('open-devtools-for-server', () => {
-		const activeWebview = webview.getActive();
+		const activeWebview = webviews.getActive();
 		if (activeWebview) {
 			activeWebview.openDevTools();
 		}
 	});
 
-	menus.on('go-back', () => webview.goBack());
-	menus.on('go-forward', () => webview.goForward());
+	menus.on('go-back', () => webviews.goBack());
+	menus.on('go-forward', () => webviews.goForward());
 
 	menus.on('reload-app', () => getCurrentWindow().reload());
 
@@ -294,7 +303,7 @@ export default () => {
 
 	screenshareModal.on('select-source', ({ id, url }) => {
 		screenshareModal.setState({ visible: false });
-		const webviewObj = webview.getByUrl(url);
+		const webviewObj = webviews.get(url);
 		webviewObj.executeJavaScript(`window.parent.postMessage({ sourceId: '${ id }' }, '*');`);
 	});
 
@@ -304,32 +313,35 @@ export default () => {
 				localStorage.setItem('sidebar-closed', JSON.stringify(true));
 			}
 		}
-		Object.values(entries).forEach((server) => webview.add(server));
-		webview.loaded();
+		Object.values(entries).forEach((server) => webviews.add(server));
+		setLoadingVisible(false);
 		updateServers();
 	});
 
 	servers.on('added', (entry) => {
-		webview.add(entry);
+		webviews.add(entry);
 		updateServers();
 	});
 
-	servers.on('removed', ({ url }) => {
-		webview.remove(url);
+	servers.on('removed', (entry) => {
+		webviews.remove(entry);
 		servers.setActive(null);
-		webview.showLanding();
+		setLoadingVisible(false);
+		setLandingVisible(true);
 		updateServers();
-		delete badges[url];
-		delete styles[url];
+		delete badges[entry.url];
+		delete styles[entry.url];
 	});
 
 	servers.on('active-setted', ({ url }) => {
-		webview.setActive(url);
+		webviews.setActive(url);
+		setLandingVisible(false);
 		updateServers();
 	});
 
 	servers.on('active-cleared', () => {
-		webview.deactiveAll();
+		webviews.deactiveAll();
+		setLandingVisible(true);
 		updateServers();
 	});
 
@@ -342,7 +354,7 @@ export default () => {
 	});
 
 	sidebar.on('reload-server', (serverUrl) => {
-		webview.getByUrl(serverUrl).reload();
+		webviews.get(serverUrl).reload();
 	});
 
 	sidebar.on('remove-server', (serverUrl) => {
@@ -350,12 +362,13 @@ export default () => {
 	});
 
 	sidebar.on('open-devtools-for-server', (hostUrl) => {
-		webview.getByUrl(hostUrl).openDevTools();
+		webviews.get(hostUrl).openDevTools();
 	});
 
 	sidebar.on('add-server', () => {
 		servers.setActive(null);
-		webview.showLanding();
+		setLoadingVisible(false);
+		setLandingVisible(true);
 	});
 
 	sidebar.on('servers-sorted', (sorting) => {
@@ -428,7 +441,7 @@ export default () => {
 		updates.quitAndInstall();
 	});
 
-	webview.on('ipc-message-unread-changed', (hostUrl, [badge]) => {
+	webviews.on('ipc-message-unread-changed', ({ url: serverUrl }, badge) => {
 		if (typeof badge === 'number' && localStorage.getItem('showWindowOnUnreadChanged') === 'true') {
 			const mainWindow = remote.getCurrentWindow();
 			mainWindow.showInactive();
@@ -436,7 +449,7 @@ export default () => {
 
 		badges = {
 			...badges,
-			[hostUrl]: badge || null,
+			[serverUrl]: badge || null,
 		};
 
 		sidebar.setState({ badges });
@@ -450,36 +463,40 @@ export default () => {
 		dock.setState({ badge: globalBadge });
 	});
 
-	webview.on('ipc-message-title-changed', (hostUrl, [title]) => {
-		servers.setTitle(hostUrl, title);
+	webviews.on('ipc-message-title-changed', ({ url: serverUrl }, title) => {
+		servers.setTitle(serverUrl, title);
 	});
 
-	webview.on('ipc-message-focus', (hostUrl) => {
-		servers.setActive(hostUrl);
+	webviews.on('ipc-message-focus', ({ url: serverUrl }) => {
+		servers.setActive(serverUrl);
 	});
 
-	webview.on('ipc-message-sidebar-style', (hostUrl, [style]) => {
+	webviews.on('ipc-message-sidebar-style', ({ url: serverUrl }, style) => {
 		styles = {
 			...styles,
-			[hostUrl]: style || null,
+			[serverUrl]: style || null,
 		};
 
 		sidebar.setState({ styles });
 	});
 
-	webview.on('ipc-message-get-sourceId', (hostUrl) => {
-		screenshareModal.setState({ visible: false, url: hostUrl });
+	webviews.on('ipc-message-get-sourceId', ({ url: serverUrl }) => {
+		screenshareModal.setState({ visible: false, url: serverUrl });
 	});
 
-	webview.on('dom-ready', () => {
+	webviews.on('ipc-message-reload-server', ({ url: serverUrl }) => {
+		webviews.get(serverUrl).loadURL(serverUrl);
+	});
+
+	webviews.on('dom-ready', () => {
 		const hasSidebar = localStorage.getItem('sidebar-closed') !== 'true';
 		sidebar.setState({
 			visible: hasSidebar,
 		});
-		webview.setSidebarPaddingEnabled(!hasSidebar);
+		webviews.setSidebarPaddingEnabled(!hasSidebar);
 	});
 
-	webview.on('did-navigate', ({ serverUrl, url }) => {
+	webviews.on('did-navigate', ({ serverUrl, url }) => {
 		servers.setLastPath(serverUrl, url);
 	});
 
@@ -488,7 +505,7 @@ export default () => {
 	}
 
 	sidebar.mount();
-	webview.mount();
+	webviews.mount();
 	aboutModal.mount();
 	screenshareModal.mount();
 	updateModal.mount();

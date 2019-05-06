@@ -1,6 +1,6 @@
 import { remote } from 'electron';
 import { servers } from './servers';
-import webview from './webview';
+import { webviews } from './webviews';
 import i18n from '../i18n';
 
 const { TouchBar, nativeImage, getCurrentWindow } = remote;
@@ -165,7 +165,7 @@ export class FormattingPanel {
 				backgroundColor: this._BACKGROUND_COLOR,
 				icon: nativeImage.createFromPath(`${ __dirname }/images/icon-${ buttonClass }.png`),
 				click: () => {
-					webview.getActive().executeJavaScript(`
+					webviews.getActive().executeJavaScript(`
 						var svg = document.querySelector("button svg[class$='${ buttonClass }']");
 						svg && svg.parentNode.click();
 						`.trim());
